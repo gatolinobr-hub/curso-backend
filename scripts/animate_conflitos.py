@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from scipy import ndimage
 
-SRC = Path("/home/ubuntu/.cursor/projects/workspace/assets/01a0ad12-5bbf-77d3-9b8f-fa0e10095223.jpg")
+SRC = Path("/workspace/assets/conflitos_album_cover.jpg")
 OUT_DIR = Path("/workspace/artifacts")
 FRAMES_DIR = Path("/tmp/conflitos_frames")
 ARTIFACTS = Path("/opt/cursor/artifacts")
@@ -21,10 +21,10 @@ FPS = 24
 N_FRAMES = int(DURATION * FPS)  # 192
 OUT_SIZE = 1024  # square delivery
 
-# Clock geometry (tuned to twin-bell face center on source 1254px)
-CLOCK_CX = 985.0
-CLOCK_CY = 855.0
-CLOCK_R = 175.0
+# Clock geometry — hand pivot + face radius on source 1254px
+CLOCK_CX = 968.0
+CLOCK_CY = 801.0
+CLOCK_R = 168.0
 
 # Neon sign ROI on source
 NEON_Y0, NEON_Y1 = 240, 530
@@ -51,73 +51,102 @@ def seamless_noise(n: int, seed: int, octaves: int = 4) -> np.ndarray:
 
 
 def build_flicker(n: int) -> np.ndarray:
-    """Irregular neon electrical flicker, mostly on, occasional dips."""
+    """Irregular neon electrical flicker — clear dips + micro buzz, seamless."""
     base = seamless_noise(n, seed=11, octaves=5)
-    micro = seamless_noise(n, seed=22, octaves=6)
+    micro = seamless_noise(n, seed=22, octaves=7)
+    buzz = seamless_noise(n, seed=33, octaves=3)
     t = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    # sharper, more noticeable brownout dips (still periodic / seamless)
-    dips = 1.0 - 0.72 * (np.sin(3 * t + 0.4) ** 28)
-    dips -= 0.55 * (np.sin(7 * t + 2.1) ** 50)
-    dips -= 0.40 * (np.sin(11 * t + 5.0) ** 70)
-    dips -= 0.30 * (np.sin(5 * t + 3.3) ** 90)
-    flick = 0.92 + 0.22 * base + 0.10 * (micro - 0.5) * 2
-    flick *= np.clip(dips, 0.22, 1.0)
-    return np.clip(flick, 0.22, 1.22).astype(np.float32)
+    # Brownout dips (periodic so the loop closes)
+    dips = 1.0 - 0.78 * (np.sin(2 * t + 0.6) ** 22)
+    dips -= 0.62 * (np.sin(5 * t + 1.4) ** 36)
+    dips -= 0.48 * (np.sin(9 * t + 2.8) ** 55)
+    dips -= 0.35 * (np.sin(13 * t + 4.1) ** 70)
+    dips -= 0.28 * (np.sin(3 * t + 5.2) ** 85)
+    # Mostly-on baseline with audible electrical instability
+    flick = 0.88 + 0.26 * base + 0.10 * (micro - 0.5) * 2 + 0.05 * (buzz - 0.5)
+    flick *= np.clip(dips, 0.18, 1.0)
+    flick = np.clip(flick, 0.20, 1.28).astype(np.float32)
+    # Circular soft blur so sharp dips don't create a seam at the loop point
+    kern = np.array([0.08, 0.18, 0.48, 0.18, 0.08], dtype=np.float32)
+    pad = len(kern) // 2
+    ext = np.concatenate([flick[-pad:], flick, flick[:pad]])
+    flick = np.convolve(ext, kern, mode="valid")
+    flick = np.clip(flick, 0.20, 1.28).astype(np.float32)
+    # Explicit end→start blend so the loop has no lighting pop
+    bridge = 20
+    for i in range(bridge):
+        t = (i + 1) / bridge
+        idx = n - bridge + i
+        flick[idx] = (1.0 - t) * flick[idx] + t * flick[0]
+    return flick.astype(np.float32)
 
 
 def build_masks(h: int, w: int, img: np.ndarray) -> dict[str, np.ndarray]:
     r, g, b = img[:, :, 0], img[:, :, 1], img[:, :, 2]
     yy, xx = np.mgrid[0:h, 0:w]
+    lum = img.mean(2)
 
     neon_roi = np.zeros((h, w), dtype=bool)
     neon_roi[NEON_Y0:NEON_Y1, NEON_X0:NEON_X1] = True
 
-    # Bright neon tubes + soft glow (do not remask letters separately — intensity only)
-    neon_core = neon_roi & (g > 130) & (g > r + 12) & (g > b - 5)
-    neon_glow = neon_roi & (g > 70) & (g > r + 5) & ((g - r) > 0)
-    neon_glow = neon_glow | ndimage.binary_dilation(neon_core, iterations=6)
-    neon_w = ndimage.gaussian_filter(neon_glow.astype(np.float32), sigma=3.5)
+    # Bright neon tubes + soft glow (intensity only — never remask letter shapes)
+    neon_core = neon_roi & (g > 120) & (g > r + 10) & (g > b - 8)
+    neon_glow = neon_roi & (g > 65) & (g > r + 4)
+    neon_glow = neon_glow | ndimage.binary_dilation(neon_core, iterations=8)
+    neon_w = ndimage.gaussian_filter(neon_glow.astype(np.float32), sigma=2.8)
     neon_w = neon_w / (neon_w.max() + 1e-8)
-    # slightly stronger on core
-    core_w = ndimage.gaussian_filter(neon_core.astype(np.float32), sigma=1.2)
+    core_w = ndimage.gaussian_filter(neon_core.astype(np.float32), sigma=1.0)
     core_w = core_w / (core_w.max() + 1e-8)
-    neon_w = np.clip(neon_w * 0.65 + core_w * 0.55, 0, 1)
+    neon_w = np.clip(neon_w * 0.55 + core_w * 0.70, 0, 1)
 
-    # Floor reflections: lower half, green-tinted wet patches
-    floor = yy > int(h * 0.52)
-    refl = floor & (g > r + 4) & (g > 28) & (g < 170) & (b > 20)
-    # exclude clock face interior
+    # Soft bloom halo around the sign (wall wash)
+    bloom = ndimage.gaussian_filter(neon_w, sigma=14.0)
+    bloom = bloom / (bloom.max() + 1e-8)
+
     dist_clock = np.sqrt((xx - CLOCK_CX) ** 2 + (yy - CLOCK_CY) ** 2)
-    refl = refl & (dist_clock > CLOCK_R * 0.92)
-    refl_w = ndimage.gaussian_filter(refl.astype(np.float32), sigma=4.0)
+
+    # Floor reflections: wet green-tinted patches + cable highlights
+    floor = yy > int(h * 0.50)
+    refl = floor & (g > r + 3) & (g > 22) & (g < 180)
+    refl = refl & (dist_clock > CLOCK_R * 0.95)
+    # also catch brighter wet sheen regardless of green bias
+    sheen = floor & (lum > 35) & (lum < 140) & (g >= r - 5) & (dist_clock > CLOCK_R * 0.95)
+    refl_w = ndimage.gaussian_filter((refl | sheen).astype(np.float32), sigma=3.5)
     refl_w = refl_w / (refl_w.max() + 1e-8)
 
-    # Cable-ish dark linear structures on floor / right wall for subtle warp
-    dark = (img.mean(2) < 45) & (yy > int(h * 0.35))
-    cables = dark & ~((dist_clock < CLOCK_R * 1.05))
+    # Cable-ish dark structures for subtle warp
+    dark = (lum < 45) & (yy > int(h * 0.35))
+    cables = dark & ~(dist_clock < CLOCK_R * 1.05)
     cables = ndimage.binary_opening(cables, iterations=1)
     cable_w = ndimage.gaussian_filter(cables.astype(np.float32), sigma=5.0)
     cable_w = cable_w / (cable_w.max() + 1e-8)
 
-    # Soft ambient light influence near neon
-    ambient = ndimage.gaussian_filter(neon_w, sigma=28.0)
+    # Room ambient falloff from neon (walls + upper scene)
+    ambient = ndimage.gaussian_filter(neon_w, sigma=36.0)
     ambient = ambient / (ambient.max() + 1e-8)
 
-    # Film border (dark frame) — keep stable weight for overlays
-    border = (xx < 48) | (xx > w - 48) | (yy < 48) | (yy > h - 48)
-    border_w = border.astype(np.float32)
+    # Clock glass / metal rim catch neon spill
+    clock_glass = ((dist_clock < CLOCK_R * 0.92) & (dist_clock > CLOCK_R * 0.15)).astype(np.float32)
+    clock_glass = ndimage.gaussian_filter(clock_glass, sigma=2.0)
+    clock_glass = clock_glass / (clock_glass.max() + 1e-8)
+    # brighter on upper-left of face (existing key light side)
+    clock_lit = clock_glass * np.clip(1.15 - 0.55 * ((xx - CLOCK_CX) / CLOCK_R), 0.35, 1.2)
+    clock_lit = clock_lit * np.clip(1.05 - 0.35 * ((yy - CLOCK_CY) / CLOCK_R), 0.45, 1.15)
 
-    # Clock face disk for second hand
-    clock_face = (dist_clock < CLOCK_R * 0.78).astype(np.float32)
-    clock_face = ndimage.gaussian_filter(clock_face, sigma=1.5)
+    clock_face = (dist_clock < CLOCK_R * 0.90).astype(np.float32)
+    clock_face = ndimage.gaussian_filter(clock_face, sigma=0.9)
+
+    border = ((xx < 48) | (xx > w - 48) | (yy < 48) | (yy > h - 48)).astype(np.float32)
 
     return {
         "neon": neon_w.astype(np.float32),
+        "bloom": bloom.astype(np.float32),
         "refl": refl_w.astype(np.float32),
         "cable": cable_w.astype(np.float32),
         "ambient": ambient.astype(np.float32),
-        "border": border_w,
+        "border": border,
         "clock_face": clock_face.astype(np.float32),
+        "clock_lit": clock_lit.astype(np.float32),
         "dist_clock": dist_clock.astype(np.float32),
     }
 
@@ -230,63 +259,79 @@ def apply_neon_and_light(
     flick: float,
     room_flick: float,
 ) -> np.ndarray:
-    out = img.copy()
+    """Modulate neon + room light. Flicker dims/brightens without reshaping letters."""
+    out = img.astype(np.float32)
     neon = masks["neon"][..., None]
+    bloom = masks["bloom"][..., None]
     refl = masks["refl"][..., None]
     ambient = masks["ambient"][..., None]
+    clock_lit = masks["clock_lit"][..., None]
+    mint = np.array([0.68, 1.20, 1.06], dtype=np.float32)
 
-    # Neon intensity: boost green/cyan when on, dim when flicker dips
-    # Preserve hue of letters — scale toward mint glow without morphing structure
-    neon_gain = 0.42 + 0.58 * flick  # relative
-    mint = np.array([0.70, 1.22, 1.08], dtype=np.float32)
-    boost = (neon_gain - 1.0)  # negative when dim
-    out += neon * boost * 95.0 * mint
-    # slight bloom on bright flicker
+    # Multiplicative neon tube response (clear on/off feel)
+    neon_mul = 0.28 + 0.72 * flick
+    out = out * (1.0 - neon) + out * neon * neon_mul
+
+    # Additive mint bloom / wall wash when bright; sink when dim
+    bloom_amt = (flick - 0.85) * 55.0
+    out += bloom * bloom_amt * mint
+
     if flick > 1.0:
-        out += neon * (flick - 1.0) * 70.0 * mint
+        out += neon * (flick - 1.0) * 90.0 * mint
+    elif flick < 0.55:
+        out -= neon * (0.55 - flick) * 70.0
 
-    # Floor reflections pulse with neon
-    refl_gain = (flick - 1.0) * 48.0
-    out += refl * refl_gain * np.array([0.55, 1.0, 0.85], dtype=np.float32)
+    # Wet floor + cable reflections track neon
+    refl_amt = (flick - 0.75) * 52.0
+    out += refl * refl_amt * np.array([0.50, 1.0, 0.82], dtype=np.float32)
 
-    # Unstable room electrical — global subtle linked to room_flick
-    room = 0.97 + 0.06 * room_flick
+    # Room electrical instability + neon ambient spill on walls
+    room = 0.90 + 0.10 * flick + 0.05 * (room_flick - 0.5)
     out *= room
-    # ambient spill near neon
-    out += ambient * (flick - 0.9) * 12.0 * np.array([0.4, 0.85, 0.7], dtype=np.float32)
+    out += ambient * (flick - 0.80) * 22.0 * np.array([0.35, 0.90, 0.70], dtype=np.float32)
+
+    # Neon spill on clock glass / rim
+    out += clock_lit * (flick - 0.80) * 18.0 * np.array([0.45, 0.95, 0.75], dtype=np.float32)
 
     return np.clip(out, 0, 255)
 
 
 def draw_second_hand(img: np.ndarray, masks: dict, frame_i: int, n_frames: int) -> np.ndarray:
-    """Rotate a thin second hand once per loop; keep other hands untouched."""
+    """Sweeping second hand around the true hand pivot; seamless full rotation."""
     h, w = img.shape[:2]
-    # Full rotation over loop for seamless return
-    angle = -2 * math.pi * frame_i / n_frames - math.pi / 2  # start at 12
-    length = CLOCK_R * 0.70
+    angle = -math.pi / 2 - 2 * math.pi * frame_i / n_frames
+    length = CLOCK_R * 0.78
+    stub = CLOCK_R * 0.16
     cx, cy = CLOCK_CX, CLOCK_CY
-    x2 = cx + length * math.cos(angle)
-    y2 = cy + length * math.sin(angle)
-    # counterweight stub opposite tip (classic analog second hand)
-    x0 = cx - length * 0.18 * math.cos(angle)
-    y0 = cy - length * 0.18 * math.sin(angle)
+    x_tip = cx + length * math.cos(angle)
+    y_tip = cy + length * math.sin(angle)
+    x_stub = cx - stub * math.cos(angle)
+    y_stub = cy - stub * math.sin(angle)
 
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    # dark hand with thin lighter edge for readability on dirty face
-    draw.line([(x0, y0), (x2, y2)], fill=(8, 14, 12, 255), width=3)
-    draw.line([(x0, y0), (x2, y2)], fill=(32, 42, 36, 220), width=1)
-    draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=(10, 16, 14, 255))
-    draw.ellipse([x2 - 2.5, y2 - 2.5, x2 + 2.5, y2 + 2.5], fill=(14, 20, 18, 240))
+
+    shadow_off = 1.5
+    draw.line(
+        [(x_stub + shadow_off, y_stub + shadow_off), (x_tip + shadow_off, y_tip + shadow_off)],
+        fill=(0, 0, 0, 90),
+        width=4,
+    )
+    draw.line([(x_stub, y_stub), (cx, cy)], fill=(6, 8, 7, 255), width=3)
+    draw.line([(cx, cy), (x_tip, y_tip)], fill=(4, 6, 5, 255), width=2)
+    mid_x = cx + (length * 0.55) * math.cos(angle)
+    mid_y = cy + (length * 0.55) * math.sin(angle)
+    draw.line([(cx, cy), (mid_x, mid_y)], fill=(40, 48, 42, 160), width=1)
+    draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=(8, 10, 9, 255))
+    draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=(28, 32, 30, 255))
+    draw.ellipse([x_tip - 2, y_tip - 2, x_tip + 2, y_tip + 2], fill=(10, 12, 11, 255))
+    draw.ellipse([x_stub - 3, y_stub - 3, x_stub + 3, y_stub + 3], fill=(8, 10, 9, 240))
 
     ov = np.array(overlay).astype(np.float32)
-    # Restrict to clock disk but keep strong opacity
-    face = (masks["dist_clock"] < CLOCK_R * 0.82).astype(np.float32)
-    face = ndimage.gaussian_filter(face, sigma=0.8)
+    face = (masks["dist_clock"] < CLOCK_R * 0.92).astype(np.float32)
+    face = ndimage.gaussian_filter(face, sigma=0.6)
     alpha = (ov[:, :, 3:4] / 255.0) * face[..., None]
-    rgb = ov[:, :, :3]
-    out = img * (1 - alpha) + rgb * alpha
-    return out
+    return img * (1.0 - alpha) + ov[:, :, :3] * alpha
 
 
 def apply_analog_interference(
@@ -382,6 +427,7 @@ def main():
         frame = src.copy()
         frame = apply_cable_warp(frame, masks["cable"], i, N_FRAMES)
         frame = apply_neon_and_light(frame, masks, float(flick_curve[i]), float(room_curve[i]))
+        # Draw hand AFTER lighting so it stays readable and catches glass spill below
         frame = draw_second_hand(frame, masks, i, N_FRAMES)
 
         # Dust before camera so push-in parallax affects floating particles slightly
