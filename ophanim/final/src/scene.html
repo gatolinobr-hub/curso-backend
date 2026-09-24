@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { margin: 0; background: transparent; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/node_modules/three/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const params = new URLSearchParams(location.search);
+const W = parseInt(params.get('w') || '1920', 10);
+const H = parseInt(params.get('h') || '1080', 10);
+const DURATION = 10;
+const FPS = 24;
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: true,
+  preserveDrawingBuffer: true,
+  powerPreference: 'low-power',
+});
+renderer.setClearColor(0x000000, 0);
+renderer.setSize(W, H, false);
+renderer.setPixelRatio(1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// Tighter FOV so the armillary fills the center like the poster
+const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 100);
+camera.position.set(0, 0, 6.0);
+camera.lookAt(0, 0, 0);
+
+scene.add(new THREE.AmbientLight(0xff5522, 0.35));
+const key = new THREE.DirectionalLight(0xff7744, 1.8);
+key.position.set(-2.5, 3.5, 5);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xff2200, 0.7);
+rim.position.set(2, -3, -2);
+scene.add(rim);
+const fill = new THREE.DirectionalLight(0x66aadd, 0.45);
+fill.position.set(3, -1, 3);
+scene.add(fill);
+const core = new THREE.PointLight(0x88eeff, 2.0, 10);
+core.position.set(0, 0, 0.15);
+scene.add(core);
+
+const texLoader = new THREE.TextureLoader();
+const loadTex = (url) =>
+  new Promise((res, rej) => texLoader.load(url, res, undefined, rej));
+
+const ringTex = await loadTex('/textures/ring_eyes.png');
+ringTex.colorSpace = THREE.SRGBColorSpace;
+ringTex.wrapS = ringTex.wrapT = THREE.RepeatWrapping;
+ringTex.repeat.set(3, 1);
+
+const eyeTex = await loadTex('/textures/central_eye.png');
+eyeTex.colorSpace = THREE.SRGBColorSpace;
+
+const irisTex = await loadTex('/textures/iris_cyan.png');
+irisTex.colorSpace = THREE.SRGBColorSpace;
+
+function ringMaterial() {
+  return new THREE.MeshStandardMaterial({
+    map: ringTex,
+    roughness: 0.48,
+    metalness: 0.42,
+    emissive: new THREE.Color(0x441100),
+    emissiveIntensity: 0.35,
+  });
+}
+
+function makeRing(major, minor, rot, turns, axis) {
+  const geo = new THREE.TorusGeometry(major, minor, 56, 192);
+  const mesh = new THREE.Mesh(geo, ringMaterial());
+  mesh.rotation.set(rot[0], rot[1], rot[2]);
+  // Spin around a WORLD axis so mid-loop 180° poses are not texture duplicates.
+  const worldAxis =
+    axis === 'x' ? new THREE.Vector3(1, 0, 0) :
+    axis === 'y' ? new THREE.Vector3(0, 1, 0) :
+                   new THREE.Vector3(0, 0, 1);
+  mesh.userData = {
+    turns,
+    worldAxis,
+    baseQuat: mesh.quaternion.clone(),
+  };
+  scene.add(mesh);
+  return mesh;
+}
+
+// Odd integer turns + distinct tilts so mid-loop orientations clearly differ.
+const rings = [
+  makeRing(1.05, 0.155, [0.35, 0.15, 0.55], 1, 'x'),
+  makeRing(1.18, 0.145, [1.25, 0.4, 0.2], -1, 'y'),
+  makeRing(1.32, 0.135, [0.55, 1.1, 0.35], 1, 'z'),
+  makeRing(1.45, 0.125, [0.9, 0.25, 1.2], -1, 'x'),
+];
+
+const eyeGroup = new THREE.Group();
+scene.add(eyeGroup);
+
+// Soft glow behind
+const glow = new THREE.Mesh(
+  new THREE.SphereGeometry(0.78, 32, 32),
+  new THREE.MeshBasicMaterial({
+    color: 0xff2200,
+    transparent: true,
+    opacity: 0.16,
+    depthWrite: false,
+  })
+);
+glow.position.z = -0.2;
+eyeGroup.add(glow);
+
+// Dark volume sphere (no photo warp)
+const orb = new THREE.Mesh(
+  new THREE.SphereGeometry(0.48, 48, 48),
+  new THREE.MeshStandardMaterial({
+    color: 0x2a0c08,
+    roughness: 0.65,
+    metalness: 0.1,
+    emissive: new THREE.Color(0x551100),
+    emissiveIntensity: 0.35,
+  })
+);
+eyeGroup.add(orb);
+
+const sclera = new THREE.Mesh(
+  new THREE.CircleGeometry(0.50, 64),
+  new THREE.MeshStandardMaterial({
+    map: eyeTex,
+    transparent: true,
+    roughness: 0.35,
+    metalness: 0.05,
+    emissive: new THREE.Color(0x224455),
+    emissiveIntensity: 0.2,
+    depthWrite: false,
+  })
+);
+sclera.position.z = 0.47;
+eyeGroup.add(sclera);
+
+const iris = new THREE.Mesh(
+  new THREE.CircleGeometry(0.24, 64),
+  new THREE.MeshStandardMaterial({
+    map: irisTex,
+    transparent: true,
+    roughness: 0.12,
+    metalness: 0.0,
+    emissive: new THREE.Color(0x33bbdd),
+    emissiveIntensity: 1.25,
+    depthWrite: false,
+  })
+);
+iris.position.z = 0.49;
+eyeGroup.add(iris);
+
+const pupil = new THREE.Mesh(
+  new THREE.CircleGeometry(0.08, 32),
+  new THREE.MeshBasicMaterial({ color: 0x030508 })
+);
+pupil.position.z = 0.50;
+eyeGroup.add(pupil);
+
+const lidMat = new THREE.MeshStandardMaterial({
+  color: 0x140705,
+  roughness: 0.88,
+  metalness: 0.05,
+});
+const lidU = new THREE.Mesh(new THREE.CircleGeometry(0.55, 48, 0, Math.PI), lidMat);
+const lidL = new THREE.Mesh(new THREE.CircleGeometry(0.55, 48, Math.PI, Math.PI), lidMat);
+lidU.position.set(0, 0.02, 0.52);
+lidL.position.set(0, -0.02, 0.52);
+lidU.scale.set(1.05, 0.02, 1);
+lidL.scale.set(1.05, 0.02, 1);
+eyeGroup.add(lidU, lidL);
+
+function blinkAmount(t) {
+  const pulse = (c, w = 0.032) => {
+    const d = Math.min(Math.abs(t - c), Math.abs(t - c + 1), Math.abs(t - c - 1));
+    return Math.exp(-((d / w) ** 2));
+  };
+  return Math.min(1, pulse(0.30) + pulse(0.70));
+}
+
+function irisOffset(t) {
+  const x = 0.055 * Math.sin(2 * Math.PI * t) + 0.025 * Math.sin(4 * Math.PI * t + 0.7);
+  const y = 0.035 * Math.sin(2 * Math.PI * t + 1.2) + 0.02 * Math.cos(6 * Math.PI * t);
+  return [x, y];
+}
+
+function setTime(t) {
+  const qSpin = new THREE.Quaternion();
+  for (const mesh of rings) {
+    const { turns, worldAxis, baseQuat } = mesh.userData;
+    const a = 2 * Math.PI * turns * t;
+    qSpin.setFromAxisAngle(worldAxis, a);
+    mesh.quaternion.copy(qSpin).multiply(baseQuat);
+  }
+  const [ox, oy] = irisOffset(t);
+  iris.position.x = ox;
+  iris.position.y = oy;
+  pupil.position.x = ox;
+  pupil.position.y = oy;
+  const b = blinkAmount(t);
+  // Semicircle lids grow vertically to cover the eye
+  lidU.scale.set(1.08, 0.04 + 1.15 * b, 1);
+  lidL.scale.set(1.08, 0.04 + 1.15 * b, 1);
+  lidU.position.y = 0.02 + 0.01 * (1 - b);
+  lidL.position.y = -0.02 - 0.01 * (1 - b);
+  renderer.render(scene, camera);
+}
+
+window.renderFrame = function (frameIndex) {
+  const t = frameIndex / (DURATION * FPS);
+  setTime(t);
+  return renderer.domElement.toDataURL('image/png');
+};
+
+window.renderAt = function (tSec) {
+  setTime((((tSec % DURATION) + DURATION) % DURATION) / DURATION);
+};
+
+setTime(0);
+document.title = 'READY';
+window.__READY__ = true;
+</script>
+</body>
+</html>
