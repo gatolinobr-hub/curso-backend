@@ -9,17 +9,12 @@
 </head>
 <body>
 <script type="importmap">
-{
-  "imports": {
-    "three": "/node_modules/three/build/three.module.js"
-  }
-}
+{ "imports": { "three": "/node_modules/three/build/three.module.js" } }
 </script>
 <script type="module">
 /**
- * Art-faithful Ophanim: textures extracted from the dark poster.
- * Rings = polar-unwrapped ring band from the art, spun on world axes.
- * Eye = photoreal cutout; iris saccades + blinks. 10s seamless loop.
+ * Rings-only 3D layer. The photoreal eye stays in the poster and is animated in 2D.
+ * Textures are sampled from the dark artwork. 10s seamless world-axis spins.
  */
 import * as THREE from 'three';
 
@@ -41,70 +36,55 @@ renderer.setSize(W, H, false);
 renderer.setPixelRatio(1);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.12;
+renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 100);
-camera.position.set(0, 0, 5.4);
+camera.position.set(0, 0, 5.35);
 camera.lookAt(0, 0, 0);
 
-scene.add(new THREE.AmbientLight(0x4a1808, 0.65));
-const key = new THREE.DirectionalLight(0xff7744, 1.7);
-key.position.set(-2.0, 3.0, 4.2);
+scene.add(new THREE.AmbientLight(0x3a1408, 0.7));
+const key = new THREE.DirectionalLight(0xff6633, 1.5);
+key.position.set(-2.2, 2.6, 4);
 scene.add(key);
-const rim = new THREE.DirectionalLight(0xff2200, 0.7);
-rim.position.set(2.2, -2.8, -1.2);
-scene.add(rim);
-const cool = new THREE.PointLight(0x55aacc, 1.6, 7, 2);
-cool.position.set(0, 0, 0.5);
-scene.add(cool);
+const fill = new THREE.DirectionalLight(0xff2200, 0.45);
+fill.position.set(2, -2, -1);
+scene.add(fill);
+const core = new THREE.PointLight(0xffaa66, 0.9, 5, 2);
+core.position.set(0, 0, 0.2);
+scene.add(core);
 
 const texLoader = new THREE.TextureLoader();
 const loadTex = (url) =>
   new Promise((res, rej) => texLoader.load(url, res, undefined, rej));
 
-const ringUrl = `/textures/ring_eyes_${VARIANT}.png`;
-const eyeUrl = `/textures/central_eye_${VARIANT}.png`;
-const irisUrl = `/textures/iris_${VARIANT}.png`;
-
-let ringTex, eyeTex, irisTex;
+let ringTex;
 try {
-  ringTex = await loadTex(ringUrl);
+  ringTex = await loadTex(`/textures/ring_eyes_${VARIANT}.png`);
 } catch {
   ringTex = await loadTex('/textures/ring_eyes.png');
 }
-try {
-  eyeTex = await loadTex(eyeUrl);
-} catch {
-  eyeTex = await loadTex('/textures/central_eye.png');
-}
-try {
-  irisTex = await loadTex(irisUrl);
-} catch {
-  irisTex = await loadTex('/textures/iris_cyan.png');
-}
-
-for (const t of [ringTex, eyeTex, irisTex]) {
-  t.colorSpace = THREE.SRGBColorSpace;
-}
+ringTex.colorSpace = THREE.SRGBColorSpace;
 ringTex.wrapS = ringTex.wrapT = THREE.RepeatWrapping;
-ringTex.repeat.set(2.0, 1.0);
+ringTex.repeat.set(2.2, 1);
 
-function ringMaterial() {
+function ringMat() {
   return new THREE.MeshStandardMaterial({
     map: ringTex,
-    roughness: 0.58,
-    metalness: 0.32,
-    emissive: new THREE.Color(0x3a0a00),
-    emissiveIntensity: 0.35,
-    color: new THREE.Color(0xffccaa),
+    roughness: 0.55,
+    metalness: 0.35,
+    emissive: new THREE.Color(0x2a0800),
+    emissiveIntensity: 0.4,
+    color: new THREE.Color(0xeebb99),
   });
 }
 
 function makeRing(major, minor, rot, turns, axis) {
-  const geo = new THREE.TorusGeometry(major, minor, 72, 256);
-  const mesh = new THREE.Mesh(geo, ringMaterial());
+  const mesh = new THREE.Mesh(
+    new THREE.TorusGeometry(major, minor, 64, 220),
+    ringMat()
+  );
   mesh.rotation.set(rot[0], rot[1], rot[2]);
   const worldAxis =
     axis === 'x' ? new THREE.Vector3(1, 0, 0) :
@@ -115,133 +95,20 @@ function makeRing(major, minor, rot, turns, axis) {
   return mesh;
 }
 
-// Rest poses approximate the poster’s interlocking cage
+// Nested cage — leave a clear hole for the poster's real eye
 const rings = [
-  makeRing(0.95, 0.145, [0.55, 0.10, 0.85], 1, 'x'),
-  makeRing(1.10, 0.135, [1.45, 0.25, 0.05], -1, 'y'),
-  makeRing(1.24, 0.125, [0.25, 1.15, 0.45], 1, 'z'),
-  makeRing(1.38, 0.115, [1.05, 0.55, 1.05], -1, 'x'),
+  makeRing(1.02, 0.13, [0.6, 0.12, 0.9], 1, 'x'),
+  makeRing(1.16, 0.12, [1.48, 0.22, 0.08], -1, 'y'),
+  makeRing(1.30, 0.11, [0.3, 1.2, 0.5], 1, 'z'),
+  makeRing(1.44, 0.10, [1.1, 0.5, 1.1], -1, 'x'),
 ];
 
-const eyeGroup = new THREE.Group();
-scene.add(eyeGroup);
-
-// Tiny warm core — no white bubble
-const glow = new THREE.Mesh(
-  new THREE.SphereGeometry(0.55, 24, 24),
-  new THREE.MeshBasicMaterial({
-    color: 0xff4400,
-    transparent: true,
-    opacity: 0.10,
-    depthWrite: false,
-  })
-);
-glow.position.z = -0.08;
-eyeGroup.add(glow);
-
-const orb = new THREE.Mesh(
-  new THREE.SphereGeometry(0.38, 40, 40),
-  new THREE.MeshStandardMaterial({
-    color: 0x140605,
-    roughness: 0.75,
-    emissive: new THREE.Color(0x551100),
-    emissiveIntensity: 0.45,
-  })
-);
-eyeGroup.add(orb);
-
-const sclera = new THREE.Mesh(
-  new THREE.CircleGeometry(0.44, 64),
-  new THREE.MeshStandardMaterial({
-    map: eyeTex,
-    transparent: true,
-    roughness: 0.4,
-    metalness: 0.0,
-    emissive: new THREE.Color(0x0a2030),
-    emissiveIntensity: 0.12,
-    depthWrite: false,
-  })
-);
-sclera.position.z = 0.38;
-eyeGroup.add(sclera);
-
-const iris = new THREE.Mesh(
-  new THREE.CircleGeometry(0.19, 64),
-  new THREE.MeshStandardMaterial({
-    map: irisTex,
-    transparent: true,
-    roughness: 0.2,
-    emissive: new THREE.Color(0x1a6688),
-    emissiveIntensity: 0.4,
-    depthWrite: false,
-  })
-);
-iris.position.z = 0.40;
-eyeGroup.add(iris);
-
-const pupil = new THREE.Mesh(
-  new THREE.CircleGeometry(0.06, 32),
-  new THREE.MeshBasicMaterial({ color: 0x010203 })
-);
-pupil.position.z = 0.41;
-eyeGroup.add(pupil);
-
-// Soft flesh lids — hidden when open (no black bar)
-const lidGeo = new THREE.SphereGeometry(0.46, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
-const lidMat = new THREE.MeshStandardMaterial({
-  color: 0x1a0906,
-  roughness: 0.92,
-  metalness: 0.0,
-  emissive: new THREE.Color(0x220800),
-  emissiveIntensity: 0.12,
-  side: THREE.DoubleSide,
-});
-const lidU = new THREE.Mesh(lidGeo, lidMat);
-const lidL = new THREE.Mesh(lidGeo, lidMat);
-lidU.position.set(0, 0.02, 0.36);
-lidL.position.set(0, -0.02, 0.36);
-lidL.rotation.z = Math.PI;
-lidU.scale.set(1, 0.02, 0.6);
-lidL.scale.set(1, 0.02, 0.6);
-eyeGroup.add(lidU, lidL);
-
-function blinkAmount(t) {
-  const pulse = (c, w = 0.026) => {
-    const d = Math.min(Math.abs(t - c), Math.abs(t - c + 1), Math.abs(t - c - 1));
-    return Math.exp(-((d / w) ** 2));
-  };
-  return Math.min(1, pulse(0.27) + pulse(0.73));
-}
-
-function irisOffset(t) {
-  return [
-    0.045 * Math.sin(2 * Math.PI * t) + 0.02 * Math.sin(4 * Math.PI * t + 0.6),
-    0.03 * Math.sin(2 * Math.PI * t + 1.1) + 0.016 * Math.cos(6 * Math.PI * t),
-  ];
-}
-
 function setTime(t) {
-  const qSpin = new THREE.Quaternion();
+  const q = new THREE.Quaternion();
   for (const mesh of rings) {
     const { turns, worldAxis, baseQuat } = mesh.userData;
-    qSpin.setFromAxisAngle(worldAxis, 2 * Math.PI * turns * t);
-    mesh.quaternion.copy(qSpin).multiply(baseQuat);
-  }
-  const [ox, oy] = irisOffset(t);
-  iris.position.x = ox;
-  iris.position.y = oy;
-  pupil.position.x = ox;
-  pupil.position.y = oy;
-  const b = blinkAmount(t);
-  const blinking = b > 0.04;
-  lidU.visible = blinking;
-  lidL.visible = blinking;
-  if (blinking) {
-    const sy = 0.05 + 1.2 * b;
-    lidU.scale.set(1.05, sy, 0.7);
-    lidL.scale.set(1.05, sy, 0.7);
-    lidU.position.y = 0.22 * (1 - b);
-    lidL.position.y = -0.22 * (1 - b);
+    q.setFromAxisAngle(worldAxis, 2 * Math.PI * turns * t);
+    mesh.quaternion.copy(q).multiply(baseQuat);
   }
   renderer.render(scene, camera);
 }
@@ -250,10 +117,8 @@ window.renderFrame = function (frameIndex) {
   setTime(frameIndex / (DURATION * FPS));
   return renderer.domElement.toDataURL('image/png');
 };
-
-window.renderAt = function (tSec) {
+window.renderAt = (tSec) =>
   setTime((((tSec % DURATION) + DURATION) % DURATION) / DURATION);
-};
 
 setTime(0);
 document.title = 'READY';
