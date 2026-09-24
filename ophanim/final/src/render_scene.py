@@ -323,11 +323,11 @@ def build_scene(variant: str):
     # Interlocking rings — different rest orientations; integer revolutions / loop
     # major radius ~ wraps around eye
     rings_spec = [
-        # name, major, minor, rest_euler(xyz), axis local rotation property, turns
-        ("RingA", 1.15, 0.16, (0, 0, 0), "Z", 1),
-        ("RingB", 1.25, 0.15, (math.radians(90), 0, 0), "Y", -1),
-        ("RingC", 1.35, 0.14, (math.radians(55), math.radians(30), math.radians(10)), "X", 2),
-        ("RingD", 1.45, 0.13, (math.radians(20), math.radians(70), math.radians(40)), "Z", -2),
+        # name, major, minor, rest_euler(xyz), world axis, turns (odd ints)
+        ("RingA", 1.15, 0.16, (0.35, 0.15, 0.55), "X", 1),
+        ("RingB", 1.25, 0.15, (1.25, 0.4, 0.2), "Y", -1),
+        ("RingC", 1.35, 0.14, (0.55, 1.1, 0.35), "Z", 1),
+        ("RingD", 1.45, 0.13, (0.9, 0.25, 1.2), "X", -1),
     ]
     rings = []
     for name, maj, mn, rest, axis, turns in rings_spec:

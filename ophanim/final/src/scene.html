@@ -16,11 +16,17 @@
 }
 </script>
 <script type="module">
+/**
+ * Art-faithful Ophanim: textures extracted from the dark poster.
+ * Rings = polar-unwrapped ring band from the art, spun on world axes.
+ * Eye = photoreal cutout; iris saccades + blinks. 10s seamless loop.
+ */
 import * as THREE from 'three';
 
 const params = new URLSearchParams(location.search);
 const W = parseInt(params.get('w') || '1920', 10);
 const H = parseInt(params.get('h') || '1080', 10);
+const VARIANT = params.get('variant') || 'computador';
 const DURATION = 10;
 const FPS = 24;
 
@@ -34,178 +40,191 @@ renderer.setClearColor(0x000000, 0);
 renderer.setSize(W, H, false);
 renderer.setPixelRatio(1);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-// Tighter FOV so the armillary fills the center like the poster
 const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 100);
-camera.position.set(0, 0, 6.0);
+camera.position.set(0, 0, 5.4);
 camera.lookAt(0, 0, 0);
 
-scene.add(new THREE.AmbientLight(0xff5522, 0.35));
-const key = new THREE.DirectionalLight(0xff7744, 1.8);
-key.position.set(-2.5, 3.5, 5);
+scene.add(new THREE.AmbientLight(0x4a1808, 0.65));
+const key = new THREE.DirectionalLight(0xff7744, 1.7);
+key.position.set(-2.0, 3.0, 4.2);
 scene.add(key);
 const rim = new THREE.DirectionalLight(0xff2200, 0.7);
-rim.position.set(2, -3, -2);
+rim.position.set(2.2, -2.8, -1.2);
 scene.add(rim);
-const fill = new THREE.DirectionalLight(0x66aadd, 0.45);
-fill.position.set(3, -1, 3);
-scene.add(fill);
-const core = new THREE.PointLight(0x88eeff, 2.0, 10);
-core.position.set(0, 0, 0.15);
-scene.add(core);
+const cool = new THREE.PointLight(0x55aacc, 1.6, 7, 2);
+cool.position.set(0, 0, 0.5);
+scene.add(cool);
 
 const texLoader = new THREE.TextureLoader();
 const loadTex = (url) =>
   new Promise((res, rej) => texLoader.load(url, res, undefined, rej));
 
-const ringTex = await loadTex('/textures/ring_eyes.png');
-ringTex.colorSpace = THREE.SRGBColorSpace;
+const ringUrl = `/textures/ring_eyes_${VARIANT}.png`;
+const eyeUrl = `/textures/central_eye_${VARIANT}.png`;
+const irisUrl = `/textures/iris_${VARIANT}.png`;
+
+let ringTex, eyeTex, irisTex;
+try {
+  ringTex = await loadTex(ringUrl);
+} catch {
+  ringTex = await loadTex('/textures/ring_eyes.png');
+}
+try {
+  eyeTex = await loadTex(eyeUrl);
+} catch {
+  eyeTex = await loadTex('/textures/central_eye.png');
+}
+try {
+  irisTex = await loadTex(irisUrl);
+} catch {
+  irisTex = await loadTex('/textures/iris_cyan.png');
+}
+
+for (const t of [ringTex, eyeTex, irisTex]) {
+  t.colorSpace = THREE.SRGBColorSpace;
+}
 ringTex.wrapS = ringTex.wrapT = THREE.RepeatWrapping;
-ringTex.repeat.set(3, 1);
-
-const eyeTex = await loadTex('/textures/central_eye.png');
-eyeTex.colorSpace = THREE.SRGBColorSpace;
-
-const irisTex = await loadTex('/textures/iris_cyan.png');
-irisTex.colorSpace = THREE.SRGBColorSpace;
+ringTex.repeat.set(2.0, 1.0);
 
 function ringMaterial() {
   return new THREE.MeshStandardMaterial({
     map: ringTex,
-    roughness: 0.48,
-    metalness: 0.42,
-    emissive: new THREE.Color(0x441100),
+    roughness: 0.58,
+    metalness: 0.32,
+    emissive: new THREE.Color(0x3a0a00),
     emissiveIntensity: 0.35,
+    color: new THREE.Color(0xffccaa),
   });
 }
 
 function makeRing(major, minor, rot, turns, axis) {
-  const geo = new THREE.TorusGeometry(major, minor, 56, 192);
+  const geo = new THREE.TorusGeometry(major, minor, 72, 256);
   const mesh = new THREE.Mesh(geo, ringMaterial());
   mesh.rotation.set(rot[0], rot[1], rot[2]);
-  // Spin around a WORLD axis so mid-loop 180° poses are not texture duplicates.
   const worldAxis =
     axis === 'x' ? new THREE.Vector3(1, 0, 0) :
     axis === 'y' ? new THREE.Vector3(0, 1, 0) :
                    new THREE.Vector3(0, 0, 1);
-  mesh.userData = {
-    turns,
-    worldAxis,
-    baseQuat: mesh.quaternion.clone(),
-  };
+  mesh.userData = { turns, worldAxis, baseQuat: mesh.quaternion.clone() };
   scene.add(mesh);
   return mesh;
 }
 
-// Odd integer turns + distinct tilts so mid-loop orientations clearly differ.
+// Rest poses approximate the poster’s interlocking cage
 const rings = [
-  makeRing(1.05, 0.155, [0.35, 0.15, 0.55], 1, 'x'),
-  makeRing(1.18, 0.145, [1.25, 0.4, 0.2], -1, 'y'),
-  makeRing(1.32, 0.135, [0.55, 1.1, 0.35], 1, 'z'),
-  makeRing(1.45, 0.125, [0.9, 0.25, 1.2], -1, 'x'),
+  makeRing(0.95, 0.145, [0.55, 0.10, 0.85], 1, 'x'),
+  makeRing(1.10, 0.135, [1.45, 0.25, 0.05], -1, 'y'),
+  makeRing(1.24, 0.125, [0.25, 1.15, 0.45], 1, 'z'),
+  makeRing(1.38, 0.115, [1.05, 0.55, 1.05], -1, 'x'),
 ];
 
 const eyeGroup = new THREE.Group();
 scene.add(eyeGroup);
 
-// Soft glow behind
+// Tiny warm core — no white bubble
 const glow = new THREE.Mesh(
-  new THREE.SphereGeometry(0.78, 32, 32),
+  new THREE.SphereGeometry(0.55, 24, 24),
   new THREE.MeshBasicMaterial({
-    color: 0xff2200,
+    color: 0xff4400,
     transparent: true,
-    opacity: 0.16,
+    opacity: 0.10,
     depthWrite: false,
   })
 );
-glow.position.z = -0.2;
+glow.position.z = -0.08;
 eyeGroup.add(glow);
 
-// Dark volume sphere (no photo warp)
 const orb = new THREE.Mesh(
-  new THREE.SphereGeometry(0.48, 48, 48),
+  new THREE.SphereGeometry(0.38, 40, 40),
   new THREE.MeshStandardMaterial({
-    color: 0x2a0c08,
-    roughness: 0.65,
-    metalness: 0.1,
+    color: 0x140605,
+    roughness: 0.75,
     emissive: new THREE.Color(0x551100),
-    emissiveIntensity: 0.35,
+    emissiveIntensity: 0.45,
   })
 );
 eyeGroup.add(orb);
 
 const sclera = new THREE.Mesh(
-  new THREE.CircleGeometry(0.50, 64),
+  new THREE.CircleGeometry(0.44, 64),
   new THREE.MeshStandardMaterial({
     map: eyeTex,
     transparent: true,
-    roughness: 0.35,
-    metalness: 0.05,
-    emissive: new THREE.Color(0x224455),
-    emissiveIntensity: 0.2,
+    roughness: 0.4,
+    metalness: 0.0,
+    emissive: new THREE.Color(0x0a2030),
+    emissiveIntensity: 0.12,
     depthWrite: false,
   })
 );
-sclera.position.z = 0.47;
+sclera.position.z = 0.38;
 eyeGroup.add(sclera);
 
 const iris = new THREE.Mesh(
-  new THREE.CircleGeometry(0.24, 64),
+  new THREE.CircleGeometry(0.19, 64),
   new THREE.MeshStandardMaterial({
     map: irisTex,
     transparent: true,
-    roughness: 0.12,
-    metalness: 0.0,
-    emissive: new THREE.Color(0x33bbdd),
-    emissiveIntensity: 1.25,
+    roughness: 0.2,
+    emissive: new THREE.Color(0x1a6688),
+    emissiveIntensity: 0.4,
     depthWrite: false,
   })
 );
-iris.position.z = 0.49;
+iris.position.z = 0.40;
 eyeGroup.add(iris);
 
 const pupil = new THREE.Mesh(
-  new THREE.CircleGeometry(0.08, 32),
-  new THREE.MeshBasicMaterial({ color: 0x030508 })
+  new THREE.CircleGeometry(0.06, 32),
+  new THREE.MeshBasicMaterial({ color: 0x010203 })
 );
-pupil.position.z = 0.50;
+pupil.position.z = 0.41;
 eyeGroup.add(pupil);
 
+// Soft flesh lids — hidden when open (no black bar)
+const lidGeo = new THREE.SphereGeometry(0.46, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
 const lidMat = new THREE.MeshStandardMaterial({
-  color: 0x140705,
-  roughness: 0.88,
-  metalness: 0.05,
+  color: 0x1a0906,
+  roughness: 0.92,
+  metalness: 0.0,
+  emissive: new THREE.Color(0x220800),
+  emissiveIntensity: 0.12,
+  side: THREE.DoubleSide,
 });
-const lidU = new THREE.Mesh(new THREE.CircleGeometry(0.55, 48, 0, Math.PI), lidMat);
-const lidL = new THREE.Mesh(new THREE.CircleGeometry(0.55, 48, Math.PI, Math.PI), lidMat);
-lidU.position.set(0, 0.02, 0.52);
-lidL.position.set(0, -0.02, 0.52);
-lidU.scale.set(1.05, 0.02, 1);
-lidL.scale.set(1.05, 0.02, 1);
+const lidU = new THREE.Mesh(lidGeo, lidMat);
+const lidL = new THREE.Mesh(lidGeo, lidMat);
+lidU.position.set(0, 0.02, 0.36);
+lidL.position.set(0, -0.02, 0.36);
+lidL.rotation.z = Math.PI;
+lidU.scale.set(1, 0.02, 0.6);
+lidL.scale.set(1, 0.02, 0.6);
 eyeGroup.add(lidU, lidL);
 
 function blinkAmount(t) {
-  const pulse = (c, w = 0.032) => {
+  const pulse = (c, w = 0.026) => {
     const d = Math.min(Math.abs(t - c), Math.abs(t - c + 1), Math.abs(t - c - 1));
     return Math.exp(-((d / w) ** 2));
   };
-  return Math.min(1, pulse(0.30) + pulse(0.70));
+  return Math.min(1, pulse(0.27) + pulse(0.73));
 }
 
 function irisOffset(t) {
-  const x = 0.055 * Math.sin(2 * Math.PI * t) + 0.025 * Math.sin(4 * Math.PI * t + 0.7);
-  const y = 0.035 * Math.sin(2 * Math.PI * t + 1.2) + 0.02 * Math.cos(6 * Math.PI * t);
-  return [x, y];
+  return [
+    0.045 * Math.sin(2 * Math.PI * t) + 0.02 * Math.sin(4 * Math.PI * t + 0.6),
+    0.03 * Math.sin(2 * Math.PI * t + 1.1) + 0.016 * Math.cos(6 * Math.PI * t),
+  ];
 }
 
 function setTime(t) {
   const qSpin = new THREE.Quaternion();
   for (const mesh of rings) {
     const { turns, worldAxis, baseQuat } = mesh.userData;
-    const a = 2 * Math.PI * turns * t;
-    qSpin.setFromAxisAngle(worldAxis, a);
+    qSpin.setFromAxisAngle(worldAxis, 2 * Math.PI * turns * t);
     mesh.quaternion.copy(qSpin).multiply(baseQuat);
   }
   const [ox, oy] = irisOffset(t);
@@ -214,17 +233,21 @@ function setTime(t) {
   pupil.position.x = ox;
   pupil.position.y = oy;
   const b = blinkAmount(t);
-  // Semicircle lids grow vertically to cover the eye
-  lidU.scale.set(1.08, 0.04 + 1.15 * b, 1);
-  lidL.scale.set(1.08, 0.04 + 1.15 * b, 1);
-  lidU.position.y = 0.02 + 0.01 * (1 - b);
-  lidL.position.y = -0.02 - 0.01 * (1 - b);
+  const blinking = b > 0.04;
+  lidU.visible = blinking;
+  lidL.visible = blinking;
+  if (blinking) {
+    const sy = 0.05 + 1.2 * b;
+    lidU.scale.set(1.05, sy, 0.7);
+    lidL.scale.set(1.05, sy, 0.7);
+    lidU.position.y = 0.22 * (1 - b);
+    lidL.position.y = -0.22 * (1 - b);
+  }
   renderer.render(scene, camera);
 }
 
 window.renderFrame = function (frameIndex) {
-  const t = frameIndex / (DURATION * FPS);
-  setTime(t);
+  setTime(frameIndex / (DURATION * FPS));
   return renderer.domElement.toDataURL('image/png');
 };
 

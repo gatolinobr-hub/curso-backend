@@ -75,7 +75,7 @@ async function main() {
   });
   const page = await browser.newPage();
   await page.setViewport({ width: size.w, height: size.h, deviceScaleFactor: 1 });
-  const url = `http://127.0.0.1:${PORT}/src/scene.html?w=${size.w}&h=${size.h}`;
+  const url = `http://127.0.0.1:${PORT}/src/scene.html?w=${size.w}&h=${size.h}&variant=${variant}`;
   await page.goto(url, { waitUntil: 'networkidle0', timeout: 120000 });
   await page.waitForFunction(() => window.__READY__ === true, { timeout: 120000 });
 
